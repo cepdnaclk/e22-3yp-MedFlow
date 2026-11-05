@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  # =======================================================
+  # 1. PostgreSQL Database (Telemetry & Event Store)
+  # =======================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: infusion_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: infusion_iot
+      POSTGRES_USER: iot_admin
+      POSTGRES_PASSWORD: secure_password123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U iot_admin -d infusion_iot"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # =======================================================
+  # 2. Eclipse Mosquitto (MQTT Message Broker)
+  # =======================================================
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: infusion_mqtt
+    restart: unless-stopped
+    ports:
+      - "1883:1883"   # Standard MQTT Port (Used by ESP32)
+      - "9001:9001"   # MQTT over WebSockets
+    volumes:
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+
+  # =======================================================
+  # 3. FastAPI Backend (REST API + MQTT Ingestion + WebSockets)
+  # =======================================================
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: infusion_backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql://iot_admin:secure_password123@postgres:5432/infusion_iot
+      MQTT_BROKER_HOST: mosquitto
+      MQTT_BROKER_PORT: 1883
+    ports:
+      - "8000:8000"   # REST API & WebSocket Endpoint
+
+volumes:
+  postgres_data:
+  mosquitto_data:
+  mosquitto_log:
+
